@@ -477,7 +477,7 @@
           <option value="">Todos los dias</option>
         </select>
         <label for="teamFilter">Equipo:</label>
-        <input id="teamFilter" type="search" placeholder="Ej: Espana, Brasil, Japon">
+        <input id="teamFilter" type="search" placeholder="Ej: España, Brasil, Japon">
         <button id="clearFiltersBtn" type="button" class="mini">Limpiar filtros</button>
       </div>
       <div id="listContainer"></div>
@@ -569,7 +569,7 @@
     };
 
     document.getElementById("uploadBtn").addEventListener("click", () => csvInputEl.click());
-    document.getElementById("reloadBtn").addEventListener("click", () => loadDefaultCsv());
+    document.getElementById("reloadBtn").addEventListener("click", () => loadDefaultCsv({ applyStoredPicks: false, clearStoredPicks: true }));
     document.getElementById("exportBtn").addEventListener("click", () => exportCurrentCsv());
     loadSheetBtnEl.addEventListener("click", () => loadFromSheetInput());
     drivePickerBtnEl.addEventListener("click", () => openDrivePicker());
@@ -597,7 +597,8 @@
       const file = ev.target.files && ev.target.files[0];
       if (!file) return;
       const text = await file.text();
-      buildFromCsv(text);
+      clearStoredPicks();
+      buildFromCsv(text, { applyStoredPicks: false });
       storeSheetUrl("");
       sheetUrlEl.value = "";
       setStatus(`CSV cargado manualmente: ${file.name}`);
@@ -690,9 +691,12 @@
       return firstLine.includes(",");
     }
 
-    async function loadSheetFromRawUrl(raw) {
+    async function loadSheetFromRawUrl(raw, options = {}) {
       const candidates = googleSheetToCsvUrl(raw);
       if (!candidates.length) return false;
+
+      const applyStored = options.applyStoredPicks !== false;
+      const clearStored = options.clearStoredPicks === true;
 
       for (const csvUrl of candidates) {
         try {
@@ -700,7 +704,8 @@
           if (!response.ok) continue;
           const csvText = await response.text();
           if (!looksLikeCsv(csvText)) continue;
-          buildFromCsv(csvText);
+          if (clearStored) clearStoredPicks();
+          buildFromCsv(csvText, { applyStoredPicks: applyStored });
           return true;
         } catch (err) {
           // Try the next candidate endpoint.
@@ -723,7 +728,7 @@
       }
 
       try {
-        const ok = await loadSheetFromRawUrl(raw);
+        const ok = await loadSheetFromRawUrl(raw, { applyStoredPicks: false, clearStoredPicks: true });
         if (!ok) throw new Error("sheet-load-failed");
         storeSheetUrl(raw);
         setStatus("Datos cargados desde Google Sheet.");
@@ -907,6 +912,14 @@
       }
     }
 
+    function clearStoredPicks() {
+      try {
+        localStorage.removeItem(STORAGE_KEY);
+      } catch (err) {
+        // Ignore storage errors.
+      }
+    }
+
     function applyStoredPicks() {
       const picks = safeStorageGet();
       for (const match of state.matches) {
@@ -999,7 +1012,8 @@
       };
     }
 
-    function buildFromCsv(csvText) {
+    function buildFromCsv(csvText, options = {}) {
+      const applyStored = options.applyStoredPicks !== false;
       const rows = parseCsv(csvText);
 
       const matches = rows.map((row) => {
@@ -1023,7 +1037,7 @@
 
       inferMissingDependencies();
       computeSides();
-      applyStoredPicks();
+      if (applyStored) applyStoredPicks();
       recomputeAll();
       inferWinnersFromNextRound();
       recomputeAll();
@@ -1731,13 +1745,15 @@
       drawConnections();
     }
 
-    async function loadDefaultCsv() {
+    async function loadDefaultCsv(options = {}) {
+      const applyStored = options.applyStoredPicks !== false;
+      const clearStored = options.clearStoredPicks === true;
       try {
         const sheetRaw = (sheetUrlEl.value || savedSheetUrl()).trim();
         if (sheetRaw) {
           sheetUrlEl.value = sheetRaw;
           if (googleSheetToCsvUrl(sheetRaw).length) {
-            const loaded = await loadSheetFromRawUrl(sheetRaw);
+            const loaded = await loadSheetFromRawUrl(sheetRaw, { applyStoredPicks: applyStored, clearStoredPicks: clearStored });
             if (loaded) {
               setStatus("CSV cargado desde Google Sheet guardada.");
               return;
@@ -1754,7 +1770,8 @@
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const csvText = await response.text();
 
-        buildFromCsv(csvText);
+        if (clearStored) clearStoredPicks();
+        buildFromCsv(csvText, { applyStoredPicks: applyStored });
         storeSheetUrl("");
         sheetUrlEl.value = "";
         setStatus(`CSV cargado: ${CSV_FILE}`);
